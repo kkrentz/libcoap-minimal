@@ -9,6 +9,12 @@
 
 #include "common.hh"
 
+static const oscore_keying_material_t oscore_keying_material = {
+  0 , 0 , { 0x0 , 0x1 , 0x2 , 0x3 , 0x4 , 0x5 , 0x6 , 0x7 ,  0x8 , 0x9 , 0xA , 0xB , 0xC , 0xD , 0xE , 0xF }
+};
+static const uint8_t sender_id[] = { 0xA };
+static const uint8_t recipient_id[] = { 0xB };
+
 int
 main(void) {
   coap_context_t  *ctx = nullptr;
@@ -18,9 +24,10 @@ main(void) {
   int result = EXIT_FAILURE;;
 
   coap_startup();
+  coap_set_log_level(LOG_DEBUG);
 
   /* resolve destination address where server should be sent */
-  if (resolve_address("coap.me", "5683", &dst) < 0) {
+  if (resolve_address("fd00::202:2:2:2", "5683", &dst) < 0) {
     coap_log(LOG_CRIT, "failed to resolve address\n");
     goto finish;
   }
@@ -31,6 +38,14 @@ main(void) {
   if (!ctx || !(session = coap_new_client_session(ctx, nullptr, &dst,
                                                   COAP_PROTO_UDP))) {
     coap_log(LOG_EMERG, "cannot create client session\n");
+    goto finish;
+  }
+
+  if (!coap_oscore_init_client_session(session,
+      &oscore_keying_material,
+      sender_id, sizeof(sender_id),
+      recipient_id, sizeof(recipient_id))) {
+    coap_log(LOG_EMERG, "cannot initialize OSCORE session\n");
     goto finish;
   }
 
