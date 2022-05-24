@@ -6,14 +6,96 @@
 #include <cstring>
 #include <cstdlib>
 #include <cstdio>
+#include <sys/stat.h>
 
 #include "common.hh"
 
-static const oscore_keying_material_t oscore_keying_material = {
-  0 , 0 , { 0x0 , 0x1 , 0x2 , 0x3 , 0x4 , 0x5 , 0x6 , 0x7 ,  0x8 , 0x9 , 0xA , 0xB , 0xC , 0xD , 0xE , 0xF }
-};
-static const uint8_t sender_id[] = { 0xA };
-static const uint8_t recipient_id[] = { 0xB };
+static const char oscore_conf_file[] = "oscore.conf";
+static const char oscore_seq_save_file[] = "sequence-number.conf";
+static coap_oscore_conf_t *oscore_conf;
+static FILE *oscore_seq_num_fp;
+
+static uint8_t *read_file_mem(const char* filename, size_t *length) {
+  FILE *f;
+  uint8_t *buf;
+  struct stat statbuf;
+
+  *length = 0;
+  if (!filename || !(f = fopen(filename, "r")))
+    return NULL;
+
+  if (fstat(fileno(f), &statbuf) == -1) {
+    fclose(f);
+    return NULL;
+  }
+
+  buf = (uint8_t *)coap_malloc(statbuf.st_size+1);
+  if (!buf) {
+    fclose(f);
+    return NULL;
+  }
+
+  if (fread(buf, 1, statbuf.st_size, f) != (size_t)statbuf.st_size) {
+    fclose(f);
+    coap_free(buf);
+    return NULL;
+  }
+  buf[statbuf.st_size] = '\000';
+  *length = (size_t)(statbuf.st_size + 1);
+  fclose(f);
+  return buf;
+}
+
+static int
+oscore_save_seq_num(uint64_t sender_seq_num, void *param COAP_UNUSED) {
+  if (oscore_seq_num_fp) {
+    rewind(oscore_seq_num_fp);
+    fprintf(oscore_seq_num_fp, "%ju\n", sender_seq_num);
+    fflush(oscore_seq_num_fp);
+  }
+  return 1;
+}
+
+static coap_oscore_conf_t *
+get_oscore_conf(void) {
+  uint8_t *buf;
+  size_t length;
+  coap_str_const_t file_mem;
+  uint64_t start_seq_num = 0;
+
+  buf = read_file_mem(oscore_conf_file, &length);
+  if (buf == NULL) {
+    fprintf(stderr, "OSCORE configuraton file error: %s\n", oscore_conf_file);
+    return NULL;
+  }
+  file_mem.s = buf;
+  file_mem.length = length;
+  if (oscore_seq_save_file) {
+    oscore_seq_num_fp = fopen(oscore_seq_save_file, "r+");
+    if (oscore_seq_num_fp == NULL) {
+      /* Try creating it */
+      oscore_seq_num_fp = fopen(oscore_seq_save_file, "w+");
+      if (oscore_seq_num_fp == NULL) {
+        fprintf(stderr, "OSCORE save restart info file error: %s\n",
+                oscore_seq_save_file);
+        return NULL;
+      }
+    }
+    if (fscanf(oscore_seq_num_fp, "%ju", &start_seq_num) == 0) {
+      /* Must be empty */
+      start_seq_num = 0;
+    }
+  }
+  oscore_conf = coap_new_oscore_conf(file_mem,
+                                     oscore_save_seq_num,
+                                     NULL, start_seq_num);
+  coap_free(buf);
+  if (oscore_conf == NULL) {
+    fprintf(stderr, "OSCORE configuraton file error: %s\n", oscore_conf_file);
+    return NULL;
+  }
+  return oscore_conf;
+}
 
 int
 main(void) {
@@ -24,7 +106,17 @@ main(void) {
   int result = EXIT_FAILURE;;
 
   coap_startup();
-  coap_set_log_level(LOG_DEBUG);
+
+  if(!coap_oscore_is_supported()) {
+    coap_log(LOG_CRIT, "OSCORE is not supported\n");
+    goto finish;
+  } else {
+    coap_log(LOG_INFO, "OSCORE is supported\n");
+  }
+  if (!get_oscore_conf()) {
+    coap_log(LOG_EMERG, "get_oscore_conf failed\n");
+    goto finish;
+  }
 
   /* resolve destination address where server should be sent */
   if (resolve_address("fd00::202:2:2:2", "5683", &dst) < 0) {
@@ -35,17 +127,9 @@ main(void) {
   /* create CoAP context and a client session */
   ctx = coap_new_context(nullptr);
 
-  if (!ctx || !(session = coap_new_client_session(ctx, nullptr, &dst,
-                                                  COAP_PROTO_UDP))) {
+  if (!ctx || !(session = coap_new_client_session_oscore(ctx, nullptr, &dst,
+                                                  COAP_PROTO_UDP, oscore_conf))) {
     coap_log(LOG_EMERG, "cannot create client session\n");
-    goto finish;
-  }
-
-  if (!coap_oscore_init_client_session(session,
-      &oscore_keying_material,
-      sender_id, sizeof(sender_id),
-      recipient_id, sizeof(recipient_id))) {
-    coap_log(LOG_EMERG, "cannot initialize OSCORE session\n");
     goto finish;
   }
 
