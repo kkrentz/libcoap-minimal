@@ -11,7 +11,9 @@
 
 static const char oscore_conf_file[] = "oscore.conf";
 static const char oscore_seq_save_file[] = "sequence-number.conf";
-static const char proxy_uri[] = "coap://[fd00::ff:fe00:2]:5683/hello";
+static const char proxy_scheme[] = "coap";
+static const char uri_host[] = "fd00::ff:fe00:2";
+static const char uri_path[] = "hello";
 static coap_oscore_conf_t *oscore_conf;
 static FILE *oscore_seq_num_fp;
 
@@ -151,8 +153,15 @@ main(void) {
   }
 
   /* add a Proxy-URI option */
-  coap_add_option(pdu, COAP_OPTION_PROXY_URI,
-      sizeof(proxy_uri) - 1, (const uint8_t *)proxy_uri);
+  coap_add_option(pdu, COAP_OPTION_PROXY_SCHEME,
+      sizeof(proxy_scheme) - 1,
+      (const uint8_t *)proxy_scheme);
+  coap_add_option(pdu, COAP_OPTION_URI_HOST,
+      sizeof(uri_host) - 1,
+      (const uint8_t *)uri_host);
+  coap_add_option(pdu, COAP_OPTION_URI_PATH,
+      sizeof(uri_path) - 1,
+      (const uint8_t *)uri_path);
 
   coap_show_pdu(LOG_WARNING, pdu);
   /* and send the PDU */
