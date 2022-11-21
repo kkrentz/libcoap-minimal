@@ -25,7 +25,7 @@ main(void) {
   coap_set_log_level(LOG_WARNING);
 
   /* resolve destination address where server should be sent */
-  if (resolve_address("coap.me", "5683", &dst) < 0) {
+  if (resolve_address("fd00::ff:fe00:2", "5683", &dst) < 0) {
     coap_log(LOG_CRIT, "failed to resolve address\n");
     goto finish;
   }
